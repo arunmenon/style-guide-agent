@@ -35,10 +35,11 @@ CREATE TABLE IF NOT EXISTS published_style_guides (
 
 INSERT INTO baseline_style_guidelines (category, product_type, guidelines_text)
 VALUES 
-  ("Fashion", NULL, "Generic fashion guidelines for brand ordering, color mention, etc."),
+  ("Fashion", "ALL", "Generic fashion guidelines for brand ordering, color mention, etc."),
   ("Fashion", "Women's Dress", "Additional best practices for dresses, e.g. mention length, fit, etc.");
 
 INSERT INTO legal_guidelines (domain, legal_text)
 VALUES
   ("ALL", "No competitor brand references. No extreme claims. Must not violate trademark usage..."),
   ("Fashion", "If referencing brand logos, disclaim usage. Must not mention competitor brand in the title, disclaimers for brand usage...");
+

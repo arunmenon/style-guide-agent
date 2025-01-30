@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List
 
-from style_guide_gen.style_guide_gen.crew import StyleGuideCrew
+from crew_flow.crew import StyleGuideCrew
 
 router = APIRouter()
 

@@ -1,10 +1,11 @@
 # style_guide_gen/style_guide_gen/crew.py
 
+import json
 from typing import Any, Dict
 from crewai import Agent, Crew, Process, Task, LLM
 from crewai.project import CrewBase, agent, task, crew, before_kickoff, after_kickoff
 from .schemas import StyleGuideOutput
-from ..knowledge.db_knowledge import BaselineStyleKnowledgeSource, LegalKnowledgeSource
+from knowledge.db_knowledge import BaselineStyleKnowledgeSource, LegalKnowledgeSource
 import sqlite3
 
 
@@ -21,7 +22,7 @@ class StyleGuideCrew:
       7) (Optional) Store final style guide in 'published_style_guides'
     """
 
-    def __init__(self, llm_model="openai/gpt-4", db_path="style_guide.db"):
+    def __init__(self, llm_model="openai/gpt-4o", db_path="style_guide.db"):
         self.llm = LLM(model=llm_model, temperature=0.2, verbose=False)
         self.db_path = db_path
         self.inputs: Dict[str, Any] = {}
@@ -161,7 +162,7 @@ class StyleGuideCrew:
             role="Final Refiner",
             goal=(
                 "Take the legally reviewed guide and finalize it. Output full markdown, ensure no optional disclaimers if mandatory. "
-                "Return final with { 'final_style_guide':..., 'notes':[] }."
+                "Return final with {{ 'final_style_guide':..., 'notes':[] }}."
             ),
             backstory="Ensures the final markdown is consistent, instructions are mandatory, no leftover placeholders, etc.",
             llm=self.llm,
@@ -181,15 +182,15 @@ class StyleGuideCrew:
 **INSTRUCTIONS**:
 1. Summarize or unify content from the knowledge sources (baseline + legal).
 2. Output strictly JSON:
-   {
+   {{
      "baseline_rules_summary":"...",
      "legal_guidelines_summary":"..."
-   }
+   }}
 No extra commentary.
 """
         return Task(
             description=description,
-            expected_output='{"baseline_rules_summary":"","legal_guidelines_summary":""}',
+            expected_output='{{"baseline_rules_summary":"","legal_guidelines_summary":""}}',
             agent=self.knowledge_agent()
         )
 
@@ -202,12 +203,12 @@ We have knowledge retrieval:
 **INSTRUCTIONS**:
 1. Outline domain-level constraints for {category}, referencing baseline_rules_summary + legal_guidelines_summary.
 2. Return JSON:
-   {"category_insights":[ "...some bullet points..." ]}
+   {{"category_insights":[ "...some bullet points..." ]}}
 No commentary outside JSON.
 """
         return Task(
             description=description,
-            expected_output='{"category_insights":[]}',
+            expected_output='{{"category_insights":[]}}',
             agent=self.domain_breakdown_agent(),
             context=[self.knowledge_retrieval_task()]
         )
@@ -224,19 +225,19 @@ Fields: {fields_needed}
 **INSTRUCTIONS**:
 1. Provide guidelines for each field, referencing domain breakdown + baseline + legal. 
 2. Return strictly JSON:
-   {
+   {{
      "product_type_analysis": "...some text about {product_type} specifics...",
      "field_guidelines": [
-       {"field":"title","notes":[]},
-       {"field":"shortDesc","notes":[]},
-       {"field":"longDesc","notes":[]}
+       {{"field":"title","notes":[]}},
+       {{"field":"shortDesc","notes":[]}},
+       {{"field":"longDesc","notes":[]}}
      ]
-   }
+   }}
 No extra commentary.
 """
         return Task(
             description=description,
-            expected_output='{"product_type_analysis":"","field_guidelines":[]}',
+            expected_output='{{"product_type_analysis":"","field_guidelines":[]}}',
             agent=self.product_type_agent(),
             context=[self.domain_breakdown_task()]
         )
@@ -250,15 +251,15 @@ We have product_type_task output:
 **INSTRUCTIONS**:
 1. Propose final style guide schema with mandatory fields. 
 2. Return JSON:
-   {
+   {{
      "final_schema": "...",
      "schema_details": [...]
-   }
+   }}
 No commentary.
 """
         return Task(
             description=description,
-            expected_output='{"final_schema":"","schema_details":[]}',
+            expected_output='{{"final_schema":"","schema_details":[]}}',
             agent=self.schema_inference_agent(),
             context=[self.product_type_task()]
         )
@@ -272,12 +273,12 @@ Domain breakdown + product type analysis + schema inference in context:
 **INSTRUCTIONS**:
 1. Build a cohesive style guide draft. Possibly partial markdown. 
 2. Return strictly JSON:
-   { "draftStyleGuide":"..." }
+   {{ "draftStyleGuide":"..." }}
 No extra commentary.
 """
         return Task(
             description=description,
-            expected_output='{"draftStyleGuide":"..."}',
+            expected_output='{{"draftStyleGuide":"..."}}',
             agent=self.style_guide_construction_agent(),
             context=[self.schema_inference_task()]
         )
@@ -292,12 +293,12 @@ Draft style guide:
 1. Check brand/IP compliance thoroughly, referencing legal guidelines. 
 2. If issues, revise them. 
 3. Return strictly JSON:
-   { "legally_reviewed_guide":"...", "legal_issues_found":[ ... ] }
+   {{ "legally_reviewed_guide":"...", "legal_issues_found":[ ... ] }}
 No extra commentary.
 """
         return Task(
             description=description,
-            expected_output='{"legally_reviewed_guide":"","legal_issues_found":[]}',
+            expected_output='{{"legally_reviewed_guide":"","legal_issues_found":[]}}',
             agent=self.legal_review_agent(),
             context=[self.style_guide_construction_task()]
         )
@@ -311,15 +312,15 @@ We have a legally reviewed style guide:
 **INSTRUCTIONS**:
 1. Finalize it. Return full markdown in "final_style_guide". 
 2. Return strictly JSON:
-   {
+   {{
      "final_style_guide":"...",
      "notes":[]
-   }
+   }}
 No extra commentary or extra fields.
 """
         return Task(
             description=description,
-            expected_output='{"final_style_guide":"","notes":[]}',
+            expected_output='{{"final_style_guide":"","notes":[]}}',
             agent=self.final_refinement_agent(),
             context=[self.legal_review_task()],
             output_pydantic=StyleGuideOutput
@@ -328,11 +329,25 @@ No extra commentary or extra fields.
     # Optionally, store the final style guide in published_style_guides
     @after_kickoff
     def store_final_guide(self, output):
-        final_data = output.json_dict or output.raw
-        if final_data and "final_style_guide" in final_data:
+        """
+        Safely extract 'final_style_guide' from the final result,
+        then insert into 'published_style_guides' in SQLite.
+        """
+        # 1) Check .json_dict first
+        final_data = output.json_dict
+        
+        # 2) If no json_dict, try to parse output.raw
+        if not final_data:
+            try:
+                final_data = json.loads(output.raw)
+            except (json.JSONDecodeError, TypeError):
+                final_data = {}
+
+        # 3) Ensure final_data is a dict and check if 'final_style_guide' is present
+        if isinstance(final_data, dict) and "final_style_guide" in final_data:
             style_guide_md = final_data["final_style_guide"]
-            category = self.inputs.get("category","Unspecified")
-            product_type = self.inputs.get("product_type","Unspecified")
+            category = self.inputs.get("category", "Unspecified")
+            product_type = self.inputs.get("product_type", "Unspecified")
 
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
