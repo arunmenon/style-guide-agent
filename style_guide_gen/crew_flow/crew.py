@@ -13,16 +13,19 @@ import sqlite3
 class StyleGuideCrew:
     """
     Multi-step crew that:
-      1) Retrieves baseline & legal guidelines from SQLite (with fallback including 'ALL')
-      2) Analyzes domain & product type
-      3) Infers a final schema
-      4) Builds a style guide
-      5) Performs an exhaustive legal review
-      6) Final refinement
-      7) (Optional) Store final style guide in 'published_style_guides'
+     1) Retrieves baseline & legal guidelines from SQLite (with fallback including 'ALL')
+     2) Analyzes domain & product type
+     3) Infers a final schema
+     4) Thoroughly builds style guides for each 'field' in fields_needed:
+        - title
+        - shortDesc
+        - longDesc
+     5) Performs an exhaustive legal review for each field snippet
+     6) Final refinement for each field snippet
+     7) (Optional) Store each snippet in 'published_style_guides' with field_name= 'title','shortDesc','longDesc'
     """
 
-    def __init__(self, llm_model="openai/gpt-4o", db_path="style_guide.db"):
+    def __init__(self, llm_model="openai/gpt-4o-mini", db_path="style_guide.db"):
         self.llm = LLM(model=llm_model, temperature=0.2, verbose=False)
         self.db_path = db_path
         self.inputs: Dict[str, Any] = {}
@@ -42,7 +45,6 @@ class StyleGuideCrew:
 
     # Agents
     # -----------------------------------------------------------------------
-
     @agent
     def knowledge_agent(self) -> Agent:
         return Agent(
@@ -92,7 +94,10 @@ class StyleGuideCrew:
                 "Combine the domain breakdown with product-type knowledge. "
                 "Refine the guidelines for each field needed (title, shortDesc, longDesc), factoring in brand or legal constraints."
             ),
-            backstory="This agent pinpoints how {product_type} might differ within {category}, referencing baseline + legal guidelines.",
+            backstory=(
+                "This agent pinpoints how {product_type} might differ within {category}, referencing baseline + legal guidelines, "
+                "and addresses each field specifically."
+            ),
             llm=self.llm,
             memory=True,
             verbose=False,
@@ -108,7 +113,7 @@ class StyleGuideCrew:
             role="Schema Inference",
             goal="Propose a final style guide schema, ensuring no optional placeholders—everything is mandatory.",
             backstory=(
-                "This agent ensures there's a well-defined JSON or markdown structure for the final style guide output. "
+                "This agent ensures there's a well-defined JSON or markdown structure for the final style guide. "
                 "No partial or ambiguous instructions are allowed."
             ),
             llm=self.llm,
@@ -125,10 +130,10 @@ class StyleGuideCrew:
         return Agent(
             role="Style Guide Constructor",
             goal=(
-                "Using the domain breakdown, product-type analysis, and schema inference, create a robust style guide. "
-                "Include best practices, do's & don'ts, examples, disclaimers, etc. in a cohesive text form."
+                "Using the domain breakdown, product-type analysis, and schema inference, create a robust style guide for each field. "
+                "We handle 'title', 'shortDesc', and 'longDesc' separately."
             ),
-            backstory="The agent merges all constraints into an initial draft text. Typically partial markdown but not final.",
+            backstory="This agent merges all constraints into an initial draft text for each field.",
             llm=self.llm,
             memory=True,
             verbose=False,
@@ -143,10 +148,10 @@ class StyleGuideCrew:
         return Agent(
             role="Exhaustive Legal Reviewer",
             goal=(
-                "Check the draft style guide for brand/IP compliance. If it references competitors or violates disclaimers, "
+                "Check the draft style guide snippet for brand/IP compliance. If it references competitors or violates disclaimers, "
                 "revise or highlight them. Return a legally reviewed version."
             ),
-            backstory="This agent thoroughly applies Walmart brand usage constraints, disclaimers, avoiding 'guarantees', etc.",
+            backstory="Thoroughly applies brand usage constraints, disclaimers, avoiding 'guarantees', etc. for each snippet.",
             llm=self.llm,
             memory=True,
             verbose=False,
@@ -161,10 +166,10 @@ class StyleGuideCrew:
         return Agent(
             role="Final Refiner",
             goal=(
-                "Take the legally reviewed guide and finalize it. Output full markdown, ensure no optional disclaimers if mandatory. "
-                "Return final with {{ 'final_style_guide':..., 'notes':[] }}."
+                "Take the legally reviewed snippet and finalize it for the specified field. Output full markdown, no optional disclaimers. "
+                "Return final with {{ 'style_guide_snippet':..., 'notes':[] }}."
             ),
-            backstory="Ensures the final markdown is consistent, instructions are mandatory, no leftover placeholders, etc.",
+            backstory="Ensures final snippet is consistent, instructions are mandatory, no leftover placeholders.",
             llm=self.llm,
             memory=True,
             verbose=False,
@@ -203,7 +208,9 @@ We have knowledge retrieval:
 **INSTRUCTIONS**:
 1. Outline domain-level constraints for {category}, referencing baseline_rules_summary + legal_guidelines_summary.
 2. Return JSON:
-   {{"category_insights":[ "...some bullet points..." ]}}
+   {{
+     "category_insights":[ "...some bullet points..." ]
+   }}
 No commentary outside JSON.
 """
         return Task(
@@ -228,9 +235,18 @@ Fields: {fields_needed}
    {{
      "product_type_analysis": "...some text about {product_type} specifics...",
      "field_guidelines": [
-       {{"field":"title","notes":[]}},
-       {{"field":"shortDesc","notes":[]}},
-       {{"field":"longDesc","notes":[]}}
+       {{
+         "field":"title",
+         "notes":[]
+       }},
+       {{
+         "field":"shortDesc",
+         "notes":[]
+       }},
+       {{
+         "field":"longDesc",
+         "notes":[]
+       }}
      ]
    }}
 No extra commentary.
@@ -264,110 +280,276 @@ No commentary.
             context=[self.product_type_task()]
         )
 
+    #
+    # PHASE: Generate style guides for each field
+    #
+
+    #
+    # 1) Title generation
+    #
     @task
-    def style_guide_construction_task(self) -> Task:
+    def title_guide_construction_task(self) -> Task:
         description = r"""
-Domain breakdown + product type analysis + schema inference in context:
+We have domain breakdown + product type analysis + schema inference in context:
 {{output from schema_inference_task}}
 
 **INSTRUCTIONS**:
-1. Build a cohesive style guide draft. Possibly partial markdown. 
+1. Build a style guide snippet specifically for the 'title' field. Possibly partial markdown.
 2. Return strictly JSON:
-   {{ "draftStyleGuide":"..." }}
+   {{
+     "draftTitleGuide":"..."
+   }}
 No extra commentary.
 """
         return Task(
             description=description,
-            expected_output='{{"draftStyleGuide":"..."}}',
+            expected_output='{{"draftTitleGuide":""}}',
             agent=self.style_guide_construction_agent(),
             context=[self.schema_inference_task()]
         )
 
     @task
-    def legal_review_task(self) -> Task:
+    def title_legal_review_task(self) -> Task:
         description = r"""
-Draft style guide:
+We have a draft Title snippet:
 {{output}}
 
 **INSTRUCTIONS**:
-1. Check brand/IP compliance thoroughly, referencing legal guidelines. 
+1. Check brand/IP compliance thoroughly for the Title snippet. 
 2. If issues, revise them. 
 3. Return strictly JSON:
-   {{ "legally_reviewed_guide":"...", "legal_issues_found":[ ... ] }}
+   {{
+     "legally_reviewed_title":"...",
+     "title_legal_issues":[ ... ]
+   }}
+No commentary.
+"""
+        return Task(
+            description=description,
+            expected_output='{{"legally_reviewed_title":"","title_legal_issues":[]}}',
+            agent=self.legal_review_agent(),
+            context=[self.title_guide_construction_task()]
+        )
+
+    @task
+    def title_final_refine_task(self) -> Task:
+        description = r"""
+We have a legally reviewed Title snippet:
+{{output}}
+
+**INSTRUCTIONS**:
+1. Finalize the Title snippet in full markdown.
+2. Return strictly JSON:
+   {{
+     "title_guide":"...",
+     "notes":[]
+   }}
 No extra commentary.
 """
         return Task(
             description=description,
-            expected_output='{{"legally_reviewed_guide":"","legal_issues_found":[]}}',
-            agent=self.legal_review_agent(),
-            context=[self.style_guide_construction_task()]
+            expected_output='{{"title_guide":"","notes":[]}}',
+            agent=self.final_refinement_agent(),
+            context=[self.title_legal_review_task()]
         )
 
+    #
+    # 2) ShortDesc generation
+    #
     @task
-    def final_refinement_task(self) -> Task:
+    def shortdesc_guide_construction_task(self) -> Task:
         description = r"""
-We have a legally reviewed style guide:
-{{output}}
+We have domain/product-type context + schema inference:
+{{output from schema_inference_task}}
 
 **INSTRUCTIONS**:
-1. Finalize it. Return full markdown in "final_style_guide". 
+1. Build a style guide snippet for the 'shortDesc' field. Possibly partial markdown.
 2. Return strictly JSON:
    {{
-     "final_style_guide":"...",
-     "notes":[]
+     "draftShortDescGuide":"..."
    }}
-No extra commentary or extra fields.
+No extra commentary.
 """
         return Task(
             description=description,
-            expected_output='{{"final_style_guide":"","notes":[]}}',
-            agent=self.final_refinement_agent(),
-            context=[self.legal_review_task()],
-            output_pydantic=StyleGuideOutput
+            expected_output='{{"draftShortDescGuide":""}}',
+            agent=self.style_guide_construction_agent(),
+            context=[self.schema_inference_task()]
         )
 
-    # Optionally, store the final style guide in published_style_guides
+    @task
+    def shortdesc_legal_review_task(self) -> Task:
+        description = r"""
+We have a draft ShortDesc snippet:
+{{output}}
+
+**INSTRUCTIONS**:
+1. Check brand/IP compliance thoroughly for the shortDesc snippet. 
+2. If issues, revise them. 
+3. Return strictly JSON:
+   {{
+     "legally_reviewed_shortdesc":"...",
+     "shortdesc_legal_issues":[ ... ]
+   }}
+No commentary.
+"""
+        return Task(
+            description=description,
+            expected_output='{{"legally_reviewed_shortdesc":"","shortdesc_legal_issues":[]}}',
+            agent=self.legal_review_agent(),
+            context=[self.shortdesc_guide_construction_task()]
+        )
+
+    @task
+    def shortdesc_final_refine_task(self) -> Task:
+        description = r"""
+We have a legally reviewed shortDesc snippet:
+{{output}}
+
+**INSTRUCTIONS**:
+1. Finalize the shortDesc snippet in full markdown.
+2. Return strictly JSON:
+   {{
+     "shortDesc_guide":"...",
+     "notes":[]
+   }}
+No extra commentary.
+"""
+        return Task(
+            description=description,
+            expected_output='{{"shortDesc_guide":"","notes":[]}}',
+            agent=self.final_refinement_agent(),
+            context=[self.shortdesc_legal_review_task()]
+        )
+
+    #
+    # 3) LongDesc generation
+    #
+    @task
+    def longdesc_guide_construction_task(self) -> Task:
+        description = r"""
+We have domain/product-type context + schema inference:
+{{output from schema_inference_task}}
+
+**INSTRUCTIONS**:
+1. Build a style guide snippet for the 'longDesc' field. Possibly partial markdown.
+2. Return strictly JSON:
+   {{
+     "draftLongDescGuide":"..."
+   }}
+No extra commentary.
+"""
+        return Task(
+            description=description,
+            expected_output='{{"draftLongDescGuide":""}}',
+            agent=self.style_guide_construction_agent(),
+            context=[self.schema_inference_task()]
+        )
+
+    @task
+    def longdesc_legal_review_task(self) -> Task:
+        description = r"""
+We have a draft longDesc snippet:
+{{output}}
+
+**INSTRUCTIONS**:
+1. Check brand/IP compliance thoroughly for the longDesc snippet. 
+2. If issues, revise them. 
+3. Return strictly JSON:
+   {{
+     "legally_reviewed_longdesc":"...",
+     "longdesc_legal_issues":[ ... ]
+   }}
+No commentary.
+"""
+        return Task(
+            description=description,
+            expected_output='{{"legally_reviewed_longdesc":"","longdesc_legal_issues":[]}}',
+            agent=self.legal_review_agent(),
+            context=[self.longdesc_guide_construction_task()]
+        )
+
+    @task
+    def longdesc_final_refine_task(self) -> Task:
+        description = r"""
+We have a legally reviewed longDesc snippet:
+{{output}}
+
+**INSTRUCTIONS**:
+1. Finalize the longDesc snippet in full markdown.
+2. Return strictly JSON:
+   {{
+     "longDesc_guide":"...",
+     "notes":[]
+   }}
+No extra commentary.
+"""
+        return Task(
+            description=description,
+            expected_output='{{"longDesc_guide":"","notes":[]}}',
+            agent=self.final_refinement_agent(),
+            context=[self.longdesc_legal_review_task()]
+        )
+
+    # after_kickoff to store final snippet
     @after_kickoff
     def store_final_guide(self, output):
         """
-        Safely extract 'final_style_guide' from the final result,
-        then insert into 'published_style_guides' in SQLite.
+        Safely parse final result for 'title_guide', 'shortDesc_guide', 'longDesc_guide'.
+        Insert each snippet into published_style_guides table with field_name='title','shortDesc','longDesc'.
         """
-        # 1) Check .json_dict first
+        import json
+
         final_data = output.json_dict
-        
-        # 2) If no json_dict, try to parse output.raw
         if not final_data:
             try:
                 final_data = json.loads(output.raw)
             except (json.JSONDecodeError, TypeError):
                 final_data = {}
 
-        # 3) Ensure final_data is a dict and check if 'final_style_guide' is present
-        if isinstance(final_data, dict) and "final_style_guide" in final_data:
-            style_guide_md = final_data["final_style_guide"]
-            category = self.inputs.get("category", "Unspecified")
-            product_type = self.inputs.get("product_type", "Unspecified")
+        category = self.inputs.get("category","Unspecified")
+        product_type = self.inputs.get("product_type","Unspecified")
 
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            insert_query = """
-                INSERT INTO published_style_guides
-                (category, product_type, style_guide_md, created_at, updated_at)
-                VALUES (?, ?, ?, datetime('now'), datetime('now'))
-            """
-            cursor.execute(insert_query, (category, product_type, style_guide_md))
-            conn.commit()
-            cursor.close()
-            conn.close()
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        def store_snippet(field_key):
+            if field_key in final_data:
+                snippet_md = final_data[field_key]
+                insert_query = """
+                  INSERT INTO published_style_guides
+                  (category, product_type, field_name, style_guide_md, created_at, updated_at)
+                  VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+                """
+                cursor.execute(insert_query, (category, product_type, field_key, snippet_md))
+
+        # Attempt to store each snippet if present
+        store_snippet("title_guide")
+        store_snippet("shortDesc_guide")
+        store_snippet("longDesc_guide")
+
+        conn.commit()
+        cursor.close()
+        conn.close()
 
         return output
 
     @crew
     def crew(self) -> Crew:
+        """
+        Steps:
+          1) knowledge_retrieval_task
+          2) domain_breakdown_task
+          3) product_type_task
+          4) schema_inference_task
+          5) title_guide_construction_task -> title_legal_review_task -> title_final_refine_task
+          6) shortdesc_guide_construction_task -> shortdesc_legal_review_task -> shortdesc_final_refine_task
+          7) longdesc_guide_construction_task -> longdesc_legal_review_task -> longdesc_final_refine_task
+        Then store final guides after kickoff.
+        """
         cat = self.inputs.get("category","Fashion")
         pt = self.inputs.get("product_type","ALL")
-        domain = cat  # or separate domain param
+        domain = cat  # or separate
 
         baseline_source = BaselineStyleKnowledgeSource(category=cat, product_type=pt, db_path=self.db_path)
         legal_source = LegalKnowledgeSource(domain=domain, db_path=self.db_path)
@@ -378,18 +560,32 @@ No extra commentary or extra fields.
                 self.domain_breakdown_agent(),
                 self.product_type_agent(),
                 self.schema_inference_agent(),
-                self.style_guide_construction_agent(),
+
+                self.style_guide_construction_agent(), # used for all field tasks
                 self.legal_review_agent(),
-                self.final_refinement_agent()
+                self.final_refinement_agent(),
             ],
             tasks=[
+                # Common plan tasks
                 self.knowledge_retrieval_task(),
                 self.domain_breakdown_task(),
                 self.product_type_task(),
                 self.schema_inference_task(),
-                self.style_guide_construction_task(),
-                self.legal_review_task(),
-                self.final_refinement_task()
+
+                # Title field sub-flow
+                self.title_guide_construction_task(),
+                self.title_legal_review_task(),
+                self.title_final_refine_task(),
+
+                # shortDesc field sub-flow
+                self.shortdesc_guide_construction_task(),
+                self.shortdesc_legal_review_task(),
+                self.shortdesc_final_refine_task(),
+
+                # longDesc field sub-flow
+                self.longdesc_guide_construction_task(),
+                self.longdesc_legal_review_task(),
+                self.longdesc_final_refine_task(),
             ],
             process=Process.sequential,
             verbose=True,

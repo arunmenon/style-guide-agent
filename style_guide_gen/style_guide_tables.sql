@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS published_style_guides (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     category TEXT NOT NULL,
     product_type TEXT NOT NULL,
+    field_name TEXT, 
     style_guide_md TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
