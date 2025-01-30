@@ -1,54 +1,132 @@
-# AgentCreator Crew
+# **StyleGuideCrew – README**
 
-Welcome to the AgentCreator Crew project, powered by [crewAI](https://crewai.com). This template is designed to help you set up a multi-agent AI system with ease, leveraging the powerful and flexible framework provided by crewAI. Our goal is to enable your agents to collaborate effectively on complex tasks, maximizing their collective intelligence and capabilities.
+## **Overview**
 
-## Installation
+The **StyleGuideCrew** is a multi-step workflow in CrewAI that **automates the creation of style guide snippets** (for *title*, *shortDesc*, and *longDesc*) to ensure product descriptions meet **domain** and **legal** standards. Each snippet is thoroughly reviewed and refined to guarantee consistency, clarity, and compliance with brand/IP constraints.
 
-Ensure you have Python >=3.10 <=3.13 installed on your system. This project uses [UV](https://docs.astral.sh/uv/) for dependency management and package handling, offering a seamless setup and execution experience.
+## **High-Level Flow**
 
-First, if you haven't already, install uv:
+1. **Knowledge Retrieval**  
+   - A specialized agent aggregates domain & product-type guidelines (baseline rules) plus brand/legal guidelines from a **knowledge base**.  
+2. **Domain Breakdown**  
+   - Analyzes the broader domain constraints (e.g., “Fashion”) to distill big-picture rules.  
+3. **Product Type Analysis**  
+   - Pinpoints how these constraints apply specifically to the given product type (like “Men’s T-Shirt”) for each field.  
+4. **Schema Inference**  
+   - Defines the final structure (fields, disclaimers) for the style guide.  
+5. **Field-Specific Creation**  
+   - For each field—**title**, **shortDesc**, **longDesc**—the crew constructs a snippet, runs a legal compliance review, and finalizes it.  
+6. **Persistence**  
+   - Each snippet is then stored or published as an official style guide resource (e.g., for internal grading or user-facing references).
 
-```bash
-pip install uv
-```
+---
 
-Next, navigate to your project directory and install the dependencies:
+## **Core Components**
 
-(Optional) Lock the dependencies and install them by using the CLI command:
-```bash
-crewai install
-```
-### Customizing
+### **Knowledge Base**
 
-**Add your `OPENAI_API_KEY` into the `.env` file**
+Two **knowledge sources** supply domain/baseline rules and legal constraints:
 
-- Modify `src/agent_creator/config/agents.yaml` to define your agents
-- Modify `src/agent_creator/config/tasks.yaml` to define your tasks
-- Modify `src/agent_creator/crew.py` to add your own logic, tools and specific args
-- Modify `src/agent_creator/main.py` to add custom inputs for your agents and tasks
+- **BaselineStyleKnowledgeSource**:  
+  - Provides best practices for a given `{category, product_type}` from a stored knowledge base.  
+  - If no exact match, can fall back to a general rule set (e.g., `'ALL'`).  
 
-## Running the Project
+- **LegalKnowledgeSource**:  
+  - Delivers brand/IP usage guidelines relevant to your domain (e.g., disclaimers, trademark usage).  
+  - Falls back to universal or `'ALL'` if no domain match.
 
-To kickstart your crew of AI agents and begin task execution, run this from the root folder of your project:
+### **Agents and Their Tasks**
 
-```bash
-$ crewai run
-```
+1. **Knowledge Agent**  
+   - Gathers domain, product-type, and legal guidelines from the knowledge base.  
+   - Produces a unified JSON with `baseline_rules_summary` + `legal_guidelines_summary`.
 
-This command initializes the agent-creator Crew, assembling the agents and assigning them tasks as defined in your configuration.
+2. **Domain Breakdown Agent**  
+   - Consumes that knowledge summary.  
+   - Outputs high-level category/domain constraints.
 
-This example, unmodified, will run the create a `report.md` file with the output of a research on LLMs in the root folder.
+3. **Product Type Agent**  
+   - Merges domain breakdown with product-type specifics, enumerating each field’s requirements.  
 
-## Understanding Your Crew
+4. **Schema Inference Agent**  
+   - Finalizes the data structure for the style guide, ensuring mandatory fields (title/shortDesc/longDesc).
 
-The agent-creator Crew is composed of multiple AI agents, each with unique roles, goals, and tools. These agents collaborate on a series of tasks, defined in `config/tasks.yaml`, leveraging their collective skills to achieve complex objectives. The `config/agents.yaml` file outlines the capabilities and configurations of each agent in your crew.
+5. **Style Guide Construction Agent**  
+   - Builds a **draft** snippet for each field.  
+   - For example, “draftTitleGuide” or “draftShortDescGuide.”
 
-## Support
+6. **Legal Review Agent**  
+   - Checks each snippet for brand/IP compliance.  
+   - Revises or flags issues if it sees competitor references or unsubstantiated claims.
 
-For support, questions, or feedback regarding the AgentCreator Crew or crewAI.
-- Visit our [documentation](https://docs.crewai.com)
-- Reach out to us through our [GitHub repository](https://github.com/joaomdmoura/crewai)
-- [Join our Discord](https://discord.com/invite/X4JWnZnxPb)
-- [Chat with our docs](https://chatg.pt/DWjSBZn)
+7. **Final Refiner Agent**  
+   - Produces a strictly valid JSON object with `"title_guide"`, `"shortDesc_guide"`, or `"longDesc_guide"`.  
+   - This is the final snippet in readable markdown.
 
-Let's create wonders together with the power and simplicity of crewAI.
+---
+
+## **Detailed Step-by-Step**
+
+1. **knowledge_retrieval_task**  
+   - Agent: *Knowledge Aggregator*  
+   - Summarizes domain/baseline + legal guidelines.  
+   - Output: `{"baseline_rules_summary":"","legal_guidelines_summary":""}`
+
+2. **domain_breakdown_task**  
+   - Agent: *Domain Breakdown*  
+   - Merges knowledge retrieval, yielding `{"category_insights":[]}`.
+
+3. **product_type_task**  
+   - Agent: *Product Type Analyzer*  
+   - Explains each field’s guidelines for `(category, product_type)`.
+
+4. **schema_inference_task**  
+   - Agent: *Schema Inference*  
+   - Proposes `{"final_schema":"","schema_details":[]}` listing mandatory fields.
+
+### **Subflows for Each Field**
+
+Assuming `fields_needed` includes `"title"`, `"shortDesc"`, `"longDesc"`, we do:
+
+1. **Title**:
+   - **Construction** (`title_guide_construction_task`): yields `{"draftTitleGuide":""}`
+   - **Legal Review** (`title_legal_review_task`): yields `{"legally_reviewed_title":""}`
+   - **Final Refinement** (`title_final_refine_task`): yields `{"title_guide":"...","notes":[]}`
+
+2. **ShortDesc**:
+   - **Construction** → `{"draftShortDescGuide":""}`
+   - **Legal Review** → `{"legally_reviewed_shortdesc":""}`
+   - **Final Refinement** → `{"shortDesc_guide":"...","notes":[]}`
+
+3. **LongDesc**:
+   - **Construction** → `{"draftLongDescGuide":""}`
+   - **Legal Review** → `{"legally_reviewed_longdesc":""}`
+   - **Final Refinement** → `{"longDesc_guide":"...","notes":[]}`
+
+### **Persistence**
+
+An **`@after_kickoff`** method scans the final JSON result for each snippet key (`"title_guide"`, `"shortDesc_guide"`, `"longDesc_guide"`) and stores them, each with a `field_name`, enabling you to track or version the final style guides.
+
+---
+
+## **Why This Agentic Flow**
+
+- **Granularity**: Each field (title, shortDesc, longDesc) is generated, legally reviewed, and refined independently.  
+- **Robust**: The multi-step design ensures domain breakdown, product-type constraints, and legal compliance are carefully integrated.  
+- **Extensible**: If you later need more fields or a new domain, just add tasks or knowledge source rows.  
+- **Compliant**: The legal review step flags disclaimers, competitor references, trademark usage, etc.
+
+---
+
+## **Key Files**
+
+1. **`crew.py`**: Defines the tasks and agents (this file).  
+2. **`db_knowledge.py`** (or a knowledge module): Custom knowledge sources for retrieving domain + legal data.  
+3. **`schemas.py`**: Pydantic classes for typed final outputs (like `StyleGuideOutput`).  
+4. **`main.py`** / **API Router**: Exposes a route, e.g. `/style-guide/generate`, that calls `StyleGuideCrew().crew().kickoff(inputs=...)`.
+
+---
+
+## **Conclusion**
+
+The **StyleGuideCrew** orchestrates a comprehensive pipeline to produce field-specific style guides for product listings in your domain. By referencing a dedicated knowledge base and running each snippet through a multi-step creation + legal compliance check, the final style guides are thorough, brand-aligned, and easily persisted for future usage.
